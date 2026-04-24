@@ -15,6 +15,8 @@ type Session struct {
 	Cmd       string
 	Memory    uint64 // RSS of process tree in bytes
 	Uptime    int    // elapsed seconds from ps etime
+	Err       string // e.g. "Timeout"
+	Status    string // e.g. "unreachable"
 }
 
 // DisplayDir returns a shortened version of StartedIn, replacing $HOME with ~.
@@ -24,6 +26,11 @@ func (s Session) DisplayDir() string {
 		return "~" + s.StartedIn[len(home):]
 	}
 	return s.StartedIn
+}
+
+// IsUnreachable reports whether the session was flagged unreachable by zmx.
+func (s Session) IsUnreachable() bool {
+	return s.Status == "unreachable"
 }
 
 // FetchSessions parses `zmx list` output into a slice of Session.
@@ -66,6 +73,10 @@ func FetchSessions() ([]Session, error) {
 				s.StartedIn = v
 			case "cmd":
 				s.Cmd = v
+			case "err":
+				s.Err = v
+			case "status":
+				s.Status = v
 			}
 		}
 		if s.Name != "" {
@@ -80,6 +91,15 @@ func KillSession(name string) error {
 	out, err := runCombinedOutput("zmx", "kill", name)
 	if err != nil {
 		return fmt.Errorf("zmx kill %s: %w\n%s", name, err, out)
+	}
+	return nil
+}
+
+// ForceKillSession runs `zmx kill <name> --force`.
+func ForceKillSession(name string) error {
+	out, err := runCombinedOutput("zmx", "kill", name, "--force")
+	if err != nil {
+		return fmt.Errorf("zmx kill %s --force: %w\n%s", name, err, out)
 	}
 	return nil
 }

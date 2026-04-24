@@ -220,13 +220,20 @@ func (m *Model) renderList(maxRows int) string {
 		}
 
 		var clientInd string
-		if s.Clients > 0 {
+		switch {
+		case s.IsUnreachable():
+			clientInd = confirmStyle.Render(padLeft("⚠", metrics.clientW))
+		case s.Clients > 0:
 			clientInd = activeClientStyle.Render(padLeft(fmt.Sprintf("●%d", s.Clients), metrics.clientW))
-		} else {
+		default:
 			clientInd = inactiveClientStyle.Render(padLeft("○0", metrics.clientW))
 		}
 
-		pidStr := pidStyle.Render(padLeft(s.PID, metrics.pidW))
+		pidLabel := s.PID
+		if pidLabel == "" {
+			pidLabel = "-"
+		}
+		pidStr := pidStyle.Render(padLeft(pidLabel, metrics.pidW))
 
 		memLabel := "-"
 		if s.Memory > 0 {
@@ -251,6 +258,8 @@ func (m *Model) renderList(maxRows int) string {
 		style := normalStyle
 		if isCursor || isSelected {
 			style = selectedStyle
+		} else if s.IsUnreachable() {
+			style = confirmStyle
 		}
 
 		var styledName string
@@ -286,6 +295,13 @@ func (m Model) renderHelp() string {
 			return confirmStyle.Render(fmt.Sprintf(" Kill %s? y/n ", targets[0]))
 		}
 		return confirmStyle.Render(fmt.Sprintf(" Kill %d sessions? y/n ", len(targets)))
+	}
+
+	if m.state == stateConfirmForce {
+		if len(m.killSurvivors) == 1 {
+			return confirmStyle.Render(fmt.Sprintf(" %s still alive. Force kill? y/n ", m.killSurvivors[0]))
+		}
+		return confirmStyle.Render(fmt.Sprintf(" %d sessions still alive. Force kill? y/n ", len(m.killSurvivors)))
 	}
 
 	parts := []string{

@@ -25,6 +25,7 @@ const (
 	stateConfirmKill
 	stateKilling
 	stateFilter
+	stateConfirmForce
 )
 
 type sortMode int
@@ -84,7 +85,9 @@ type processInfoMsg struct {
 	info map[string]zmx.ProcessInfo
 }
 
-type allGoneMsg struct{}
+type killCheckDoneMsg struct {
+	survivors []string
+}
 
 // Commands
 
@@ -105,33 +108,42 @@ func fetchPreviewCmd(name string, lines int) tea.Cmd {
 	}
 }
 
-func killOneCmd(name string) tea.Cmd {
+func killOneCmd(name string, force bool) tea.Cmd {
 	return func() tea.Msg {
-		err := zmx.KillSession(name)
+		var err error
+		if force {
+			err = zmx.ForceKillSession(name)
+		} else {
+			err = zmx.KillSession(name)
+		}
 		return killOneResultMsg{name: name, err: err}
 	}
 }
 
 func waitForGoneCmd(names []string, attempt int) tea.Cmd {
 	return func() tea.Msg {
-		if attempt >= 20 {
-			return allGoneMsg{}
-		}
 		time.Sleep(200 * time.Millisecond)
 		sessions, err := zmx.FetchSessions()
 		if err != nil {
-			return allGoneMsg{}
+			return killCheckDoneMsg{survivors: names}
 		}
 		alive := make(map[string]bool, len(sessions))
 		for _, s := range sessions {
 			alive[s.Name] = true
 		}
+		var survivors []string
 		for _, name := range names {
 			if alive[name] {
-				return waitCheckMsg{names: names, attempt: attempt + 1}
+				survivors = append(survivors, name)
 			}
 		}
-		return allGoneMsg{}
+		if len(survivors) == 0 {
+			return killCheckDoneMsg{}
+		}
+		if attempt >= 20 {
+			return killCheckDoneMsg{survivors: survivors}
+		}
+		return waitCheckMsg{names: names, attempt: attempt + 1}
 	}
 }
 
@@ -163,6 +175,8 @@ type Model struct {
 	killQueue     []string
 	killNow       string
 	killDoneNames []string
+	killForce     bool
+	killSurvivors []string
 
 	// Activity log
 	logLines  []string
@@ -421,7 +435,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.killQueue = m.killQueue[1:]
 			m.killNow = next
 			m.addLog(helpStyle.Render("  ⋯ " + next))
-			return m, killOneCmd(next)
+			return m, killOneCmd(next, m.killForce)
 		}
 		if len(m.killDoneNames) > 0 {
 			m.addLog(logDimStyle.Render("  Waiting for cleanup..."))
@@ -432,13 +446,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case waitCheckMsg:
 		return m, waitForGoneCmd(msg.names, msg.attempt)
 
-	case allGoneMsg:
+	case killCheckDoneMsg:
+		if len(msg.survivors) > 0 && !m.killForce {
+			m.killSurvivors = msg.survivors
+			m.state = stateConfirmForce
+			m.addLog(confirmStyle.Render(fmt.Sprintf("  ⚠ %d session(s) still alive", len(msg.survivors))))
+			for _, n := range msg.survivors {
+				m.addLog(confirmStyle.Render("    • " + n))
+			}
+			return m, nil
+		}
+		if len(msg.survivors) > 0 {
+			m.addLog(confirmStyle.Render(fmt.Sprintf("  ✗ %d session(s) survived force kill", len(msg.survivors))))
+		}
 		return m, m.finishKill()
 
 	case statusClearMsg:
 		m.status = ""
 
 	case tea.KeyPressMsg:
+		if m.state == stateConfirmForce {
+			return m.handleConfirmForceKey(msg)
+		}
 		if m.state == stateKilling {
 			if isQuit(msg) {
 				return m, tea.Quit
@@ -467,6 +496,8 @@ func (m *Model) finishKill() tea.Cmd {
 	m.killQueue = nil
 	m.killDoneNames = nil
 	m.killNow = ""
+	m.killForce = false
+	m.killSurvivors = nil
 	return tea.Batch(fetchSessionsCmd, clearStatusAfter(3*time.Second))
 }
 

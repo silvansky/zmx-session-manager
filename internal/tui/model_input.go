@@ -241,6 +241,7 @@ func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		total := len(targets)
 		m.state = stateKilling
 		m.killDoneNames = nil
+		m.killForce = false
 
 		m.addLog(titleStyle.Render(fmt.Sprintf("Killing %d session(s)...", total)))
 
@@ -248,10 +249,34 @@ func (m Model) handleConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.killQueue = targets[1:]
 		m.killNow = first
 		m.addLog(helpStyle.Render("  ⋯ " + first))
-		return m, killOneCmd(first)
+		return m, killOneCmd(first, false)
 	}
 	if isRune(msg, "n") {
 		m.state = stateNormal
+	}
+	return m, nil
+}
+
+func (m Model) handleConfirmForceKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if isQuit(msg) {
+		return m, tea.Quit
+	}
+	if msg.Code == tea.KeyEscape || msg.Code == tea.KeyBackspace || isRune(msg, "n") {
+		return m, m.finishKill()
+	}
+	if isRune(msg, "y") {
+		targets := m.killSurvivors
+		m.killSurvivors = nil
+		m.killForce = true
+		m.killDoneNames = nil
+		m.state = stateKilling
+
+		m.addLog(titleStyle.Render(fmt.Sprintf("Force killing %d session(s)...", len(targets))))
+		first := targets[0]
+		m.killQueue = targets[1:]
+		m.killNow = first
+		m.addLog(helpStyle.Render("  ⋯ " + first))
+		return m, killOneCmd(first, true)
 	}
 	return m, nil
 }

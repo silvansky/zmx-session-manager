@@ -217,6 +217,37 @@ func TestFetchSessionsOldFormat(t *testing.T) {
 	}
 }
 
+func TestFetchSessionsUnreachable(t *testing.T) {
+	orig := deps
+	defer func() { deps = orig }()
+
+	deps.command = func(name string, arg ...string) *exec.Cmd {
+		script := "printf 'name=alive\\tpid=1\\tclients=0\\tstart_dir=/tmp\\n" +
+			"  name=stuck\\terr=Timeout\\tstatus=unreachable\\n'"
+		return exec.Command("sh", "-c", script)
+	}
+
+	got, err := FetchSessions()
+	if err != nil {
+		t.Fatalf("FetchSessions error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(got))
+	}
+	if got[0].IsUnreachable() {
+		t.Errorf("alive session should not be unreachable")
+	}
+	if !got[1].IsUnreachable() {
+		t.Errorf("stuck session should be unreachable (status=%q)", got[1].Status)
+	}
+	if got[1].Err != "Timeout" {
+		t.Errorf("stuck session Err = %q, want %q", got[1].Err, "Timeout")
+	}
+	if got[1].PID != "" {
+		t.Errorf("stuck session PID = %q, want empty", got[1].PID)
+	}
+}
+
 func TestCopyToClipboardUsesInjectedDeps(t *testing.T) {
 	orig := deps
 	defer func() { deps = orig }()
